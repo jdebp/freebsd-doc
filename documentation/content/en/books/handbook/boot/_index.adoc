@@ -56,7 +56,7 @@ FreeBSD's boot process provides a great deal of flexibility in customizing what 
 
 This chapter details the configuration options that can be set.
 It demonstrates how to customize the FreeBSD boot process, including everything that happens until the FreeBSD kernel has started, probed for devices, and started man:init[8].
-This occurs when the text color of the boot messages changes from bright white to grey.
+This occurs when the text color of the boot messages changes from bright white (or bright multi-colored) to grey.
 
 Read this chapter to learn:
 
