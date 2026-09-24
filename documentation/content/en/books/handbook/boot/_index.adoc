@@ -70,8 +70,8 @@ Read this chapter to learn:
 This chapter only describes the boot process for FreeBSD running on x86 and amd64 systems.
 ====
 
-[[boot-introduction]]
-== FreeBSD Boot Process
+[[boot-concepts]]
+== Jargon and concepts
 
 Turning on a computer and starting the operating system poses an interesting dilemma.
 By definition, the computer does not know how to do anything until the operating system is started.
@@ -83,52 +83,183 @@ A character had fallen part way down a manhole, and pulled himself out by grabbi
 In the early days of computing, the term _bootstrap_ was applied to the mechanism used to load the operating system.
 It has since become shortened to "booting".
 
-On x86 hardware, the Basic Input/Output System (BIOS) is responsible for loading the operating system.
-The BIOS looks on the hard disk for the Master Boot Record (MBR), which must be located in a specific place on the disk.
-The BIOS has enough knowledge to load and run the MBR, and assumes that the MBR can then carry out the rest of the tasks involved in loading the operating system, possibly with the help of the BIOS.
+=== Firmware
+
+The solution to the dilemma is that there are programs in _firmware_, which are run when the computer is turned on.
+Firmware is non-volatile memory, which is not cleared when the machine is powered off.
+On x86 and amd64 systems, there are two overall categories of firmware:
+
+* The so-called Basic Input/Output System (BIOS) dates from the times of the IBM Personal Computer/AT (PC/AT).
+* The Unified Extensible Firmware Interface (UEFI) was invented by Intel to address the many limitations and complexities of BIOS firmware that had become apparent over the following decade.
+
+These firmware programs know enough about the disk to load some simple programs from some well-known locations there, and to then run them.
+Those simple programs know more about the disk, and can load and run other programs.
+
+=== Stages and boot records
+
+Booting is thus described as a series of _stages_, each one loading and running the next until the operating system proper is loaded and running.
+
+The exact number and purpose of the individual stages varies.
+One of the several reasons that UEFI was invented was that the BIOS imposed draconian size limits on several of the bootstrap programs.
+They had to fit into one _boot record_, a 512-byte disk sector, less the sizes of the other things that that record also contained.
+This means that several stages needed a very small program, small enough to fit into such a disk sector, to load and run the rest of the code for that stage.
+
+The term _boot record_ covers booting both from removable media, such as a floppy disk, and from fixed media, such as a hard disk.
+The BIOS system loaded a _Volume Boot Record_ (VBR) from floppy disks, which also contained a BIOS Parameter Block (BPB).
+It loaded a _Master Boot Record_ (MBR) from hard discs, which also contained part of the partition table.
+
+A simple MBR boot program in its turn loaded a VBR from one individual disk partition.
+More complex ones needed to load additional parts of themselves, containing code to do things like interact with the operator in less terse ways, and would then after that load a VBR from a disk partition.
+
+=== boot managers
+
+The BIOS system gained complexities from third-party _boot managers_, programs that allowed the operator to pick and choose which of several operating systems to boot when a computer had multiple operating systems installed.
+Some examples of boot managers are IBM's Boot Manager that came with OS/2, the similar Boot Manager that came with Partition Magic, Microsoft's Windows Boot Manager, and the GNU Grand Unified Boot Manager (GRUB).
+
+UEFI also contains a Boot Manager.
+The Microsoft Windows Boot Manager, GRUB, and the EFI Boot Manager not only can pick and choose amongst operating systems, they can pass information to those operating systems, in the form of file pathnames, flags, and variables.
 
 [NOTE]
 ====
-FreeBSD provides for booting from both the older MBR standard, and the newer GUID Partition Table (GPT).
-GPT partitioning is often found on computers with the Unified Extensible Firmware Interface (UEFI).
-However, FreeBSD can boot from GPT partitions even on machines with only a legacy BIOS with man:gptboot[8].
-Work is under way to provide direct UEFI booting.
-====
-
-The code within the MBR is typically referred to as a _boot manager_, especially when it interacts with the user.
-The boot manager usually has more code in the first track of the disk or within the file system.
-Examples of boot managers include the standard FreeBSD boot manager boot0, also called Boot Easy, and GNU GRUB, which is used by many Linux(R) distributions.
-
-[NOTE]
-====
+This chapter does not cover any third-party Boot Managers that need additional software to be installed beyond FreeBSD itself.
 // There is extref:{faq}[a frequently asked question] about GRUB. Beyond the answer there, //
 Users of GRUB should refer to https://www.gnu.org/software/grub/grub-documentation.html[GNU-provided documentation].
+
+The UEFI Boot Manager is included in the UEFI firmware itself.
+FreeBSD comes with tools for working with it.
 ====
 
-If only one operating system is installed, the MBR searches for the first bootable (active) slice on the disk, and then runs the code on that slice to load the remainder of the operating system.
-When multiple operating systems are present, a different boot manager can be installed to display a list of operating systems so the user can select one to boot.
+[[boot-introduction]]
+== FreeBSD Boot Process
 
-The remainder of the FreeBSD bootstrap system is divided into three stages.
-The first stage knows just enough to get the computer into a specific state and run the second stage.
-The second stage can do a little bit more, before running the third stage.
-The third stage finishes the task of loading the operating system.
-The work is split into three stages because the MBR puts limits on the size of the programs that can be run at stages one and two.
-Chaining the tasks together allows FreeBSD to provide a more flexible loader.
+The FreeBSD boot process can take number of different forms.
+Which form is used is determined by what firmware the machine has (UEFI or BIOS) and how its (boot) disk is partitioned (MBR or GPT).
 
-The kernel is then started and begins to probe for devices and initialize them for use.
-Once the kernel boot process is finished, the kernel passes control to the user process man:init[8], which makes sure the disks are in a usable state, starts the user-level resource configuration which mounts file systems, sets up network cards to communicate on the network, and starts the processes which have been configured to run at startup.
+The two main standards for disk partitioning are the older MBR partition table, and the newer GUID Partition Table (GPT).
+GPT partitioning is often found on computers with UEFI firmware.
+But that is not a requirement, and a GPT can even be used on machines with only an old BIOS.
 
-This section describes these stages in more detail and demonstrates how to interact with the FreeBSD boot process.
+[NOTE]
+====
+A third standard is the old BSD "disklabel" scheme.
+This is no longer in common use, and is not covered by this chapter.
+====
+
+The forms converge at the point where a loader program loads and runs the FreeBSD kernel, its kernel modules, and some ancillary information.
+
+The kernel is started by that loader and begins to probe for devices and initialize them for use.
+Once the kernel boot procedure is finished, the kernel passes control to the user process man:init[8], which makes sure the disks are in a usable state, starts the user-level resource configuration which mounts file systems, sets up network cards to communicate on the network, and starts the processes which have been configured to run at startup.
+
+=== On UEFI machines
+
+On UEFI machines, FreeBSD bootstrap has just two stages to get as far as the kernel being up and running:
+
+. The UEFI Boot Manager loads and runs the man:loader.efi[8] program from the EFI System Partition.
+. The man:loader.efi[8] program loads and runs the FreeBSD kernel.
+
+[NOTE]
+====
+There used to be an intermediate stage man:boot1.efi[8] program.
+This is no longer required, and man:loader.efi[8] is now simply loaded directly.
+====
+
+To control where and how in the EFI Boot Manager the entry (or even entries) for FreeBSD appears, and in what order the EFI Boot Manager attempts to bootstrap things, use man:efibootmgr[8].
+
+man:loader.efi[8] is put into place on the EFI System Partition by the FreeBSD installer.
+To re-install it if that becomes necessary, simply copy it from the FreeBSD filesystem (where it exists as a file in the [.filename]#/boot# directory) to one of the several known locations where the UEFI Boot Manager expects it to be.
+
+For example, supposing that the EFI System Partition is partition number 1 on device [.filename]#ada1#:
+[source,shell]
+....
+# mount -t msdosfs /dev/ada1p1 /boot/efi
+# cp /boot/loader.efi /boot/efi/efi/boot/BOOTX64.efi
+# cp /boot/loader.efi /boot/efi/efi/freebsd/loader.efi
+# umount /boot/efi
+....
+
+[NOTE]
+====
+The name [.filename]#EFI/FREEBSD/LOADER.EFI# is the FreeBSD conventional location for man:loader.efi[8] when UEFI booting from fixed storage devices.
+The name [.filename]#EFI/BOOT/BOOTX64.EFI# is for amd64 systems when booting from removable storage devices.
+The latter file has a different name on other processor architectures.
+Refer to man:loader.efi[8] and man:uefi[8] to find the names of the architecture-specific files.
+
+The `/boot/efi` mount point is described in man:hier[7].
+====
+
+=== On BIOS machines with GPT disks
+
+On BIOS machines with GPT disks, there are more stages:
+
+. The BIOS loads and runs the MBR from its well-known place on the first (according to the BIOS) disk.
+. The MBR program reads the GUID Partition Table and looks for a partition of type `freebsd-boot`.
+. The MBR program reads the entire `freebsd-boot` partition contents into memory and runs the whole thing as one program.
+. The `freebsd-boot` program is either man:gptboot[8] or man:gptzfsboot[8].
+.. man:gptboot[8] looks for man:loader[8] in the `boot` directory of a FreeBSD UFS partition, and loads and runs it.
+.. man:gptzfsboot[8] looks for FreeBSD ZFS partitions, looks at their zpool(s), reads the `bootfs` property of the zpool, and loads and runs man:zfsloader[8] from the [.filename]#/boot# directory in the named ZFS dataset.
+. The man:loader[8] or man:zfsloader[8] program loads and runs the FreeBSD kernel.
+
+The programs here are put into place by the FreeBSD installer.
+To re-install them manually if that becomes necessary, use the `bootstrap` subcommand of the man:gpart[8] command.
+Copies of the programs exist in the FreeBSD filesystem as files in the [.filename]#/boot# directory.
+
+For example, supposing that the first BIOS disk is device [.filename]#ada0#, the `freebsd-boot` partition is (GPT) partition number 1 on that disk, and FreeBSD proper is installed in a UFS partition:
+[source,shell]
+....
+# gpart bootstrap -b /boot/pmbr ada0
+# gpart bootstrap -p /boot/gptboot -i 1 ada0
+....
+
+For a second example, supposing that the first BIOS disk is device [.filename]#ada0#, the `freebsd-boot` partition is (GPT) partition number 1 on that disk, and FreeBSD proper is installed in a ZFS partition:
+[source,shell]
+....
+# gpart bootstrap -b /boot/pmbr ada0
+# gpart bootstrap -p /boot/gptzfsboot -i 1 ada0
+....
+
+[WARNING]
+====
+Do not use man:dd[1] to attempt to install these bootstrap programs.
+Specialized copying procedures provided by GEOM are needed to ensure that writing the programs to disk does not overwrite ('protective MBR') partition tables.
+
+Do not use man:fdisk[1] to attempt to install bootstrap programs on GPT disks.
+It defaults to installing the wrong program.
+[.filename]#/boot/mbr# expects the old MBR partition table layout.
+The correct program for GPT disks is [.filename]#/boot/pmbr#.
+====
+
+=== On BIOS machines with MBR partition table disks
+
+On BIOS machines with MBR partition table disks, there are even more stages, and an old rather confusing stage numbering system, that does not apply to UEFI and GPT:
+
+. The BIOS loads and runs the MBR from its well-known place on the first (according to the BIOS) disk.
+  For historical reasons, this is known as "stage 0".
+  Sometimes there is a "stage 0.5".
+. The MBR program reads the MBR Partition Table and picks the boot partition.
+. The MBR program reads (only) the VBR from the boot partition and runs that.
+. The VBR is the first part (known for historical reasons as "stage 1") of the next boot program:
+.. On FreeBSD UFS partitions, this is man:boot[8].
+.. On FreeBSD ZFS partitions, this is man:zfsboot[8].
+. man:boot[8] or man:zfsboot[8] reads its second part (known for historical reasons as "stage 2") from the same boot partition.
+. The "stage 1 and 2" boot program loads the loader:
+.. man:boot[8] loads and runs man:loader[8] from the [.filename]#/boot# directory in the boot partition.
+.. man:zfsboot[8] looks for FreeBSD ZFS partitions, looks at their zpool(s), reads the `bootfs` property of the zpool, and loads and runs man:zfsloader[8] from the [.filename]#/boot# directory in the named ZFS dataset.
+. The man:loader[8] or man:zfsloader[8] program loads and runs the FreeBSD kernel.
 
 [[boot-boot0]]
-=== The Boot Manager
+==== Stage 0
 
-The boot manager code in the MBR is sometimes referred to as _stage zero_ of the boot process.
-By default, FreeBSD uses the boot0 boot manager.
+There are several programs that can be chosen for "stage 0".
 
-The MBR installed by the FreeBSD installer is based on [.filename]#/boot/boot0#.
-The size and capability of boot0 is restricted to 446 bytes due to the slice table and `0x55AA` identifier at the end of the MBR.
-If boot0 and multiple operating systems are installed, a message similar to this example will be displayed at boot time:
+The [.filename]#/boot/mbr# program is very basic, and is like the simple programs that other operating system install in the same place.
+It simply selects the first "active" partition in the table, and selects that as the boot partition.
+The size and capability of [.filename]#/boot/mbr# is restricted to 446 bytes due to the embedded (primary) partition table, the `0x55AA` identifier at the end of the MBR, and possibly even a Windows NT disk ID.
+
+[.filename]#/boot/boot0# is a 2-stage "stage 0" that presents less terse information to the operator, at the expense of not fitting into a single boot record and having to load itself in 2 parts.
+(This is sometimes known by the name 'Boot Easy'.)
+[.filename]#/boot/boot0sio# is a version of [.filename]#/boot/boot0# that uses the serial port to interact with the operator, rather than the keyboard and screen.
+
+If [.filename]#/boot/boot0# and multiple operating systems are installed, a message similar to this example will be displayed at boot time:
 
 [[boot-boot0-example]]
 .[.filename]#boot0# Screenshot
@@ -145,29 +276,46 @@ Default: F2
 
 ====
 
-Other operating systems will overwrite an existing MBR if they are installed after FreeBSD.
-If this happens, or to replace the existing MBR with the FreeBSD MBR, use the following command:
+The [.filename]#/boot/boot0# program and its variants are customizable.
+To create a custom configuration of one of these, use man:boot0cfg[8].
 
+The programs here are put into place by the FreeBSD installer.
+Other operating systems will overwrite an existing MBR program if they are installed after FreeBSD.
+They often will just do the same thing as [.filename]#/boot/mbr#.
+
+To re-install one of the other MBR programs manually, if their functionality is required instead, use the `bootstrap` subcommand of the man:gpart[8] command.
+Copies of the programs exist in the FreeBSD filesystem as files in the [.filename]#/boot# directory.
+
+For example, supposing that the first BIOS disk is device [.filename]#ada0#, the first ATA (a.k.a. IDE) disk:
+[source,shell]
+....
+# gpart bootstrap -b /boot/boot0 ada0
+....
+It would be [.filename]#ad2# for the first IDE disk on a second IDE controller, or [.filename]#da0# for the first SCSI disk, and so forth.
+
+The older man:fdisk[8] command can be used instead:
 [source,shell]
 ....
 # fdisk -B -b /boot/boot0 device
 ....
 
-where _device_ is the boot disk, such as [.filename]#ad0# for the first IDE disk, [.filename]#ad2# for the first IDE disk on a second IDE controller, or [.filename]#da0# for the first SCSI disk.
-To create a custom configuration of the MBR, refer to man:boot0cfg[8].
+[WARNING]
+====
+Although it has a similar looking name, [.filename]#/boot/pmbr# expects the GUID Partition Table, and is not for use on MBR partition table disks.
+====
 
 [[boot-boot1]]
-=== Stage One and Stage Two
+==== Stage One and Stage Two
 
 Conceptually, the first and second stages are part of the same program on the same area of the disk.
 Due to space constraints, they have been split into two, but are always installed together.
 They are copied from the combined [.filename]#/boot/boot# by the FreeBSD installer or `bsdlabel`.
 
 These two stages are located outside file systems, in the first track of the boot slice, starting with the first sector.
-This is where boot0, or any other boot manager, expects to find a program to run which will continue the boot process.
+This is where boot0, or any other MBR program (even one from another operating system), expects to find a program to run which will continue the boot process.
 
 The first stage, [.filename]#boot1#, is very simple, since it can only be 512 bytes in size.
-It knows just enough about the FreeBSD _bsdlabel_, which stores information about the slice, to find and execute [.filename]#boot2#.
+It knows just enough about the slice that it is in (a FreeBSD _bsdlabel_, which stores information about the slice, or just a plain old UFS partition in an MBR partition table) to find and execute [.filename]#boot2#.
 
 Stage two, [.filename]#boot2#, is slightly more sophisticated, and understands the FreeBSD file system enough to find files.
 It can provide a simple interface to choose the kernel or loader to run.
@@ -188,24 +336,17 @@ boot:
 
 ====
 
-To replace the installed [.filename]#boot1# and [.filename]#boot2#, use `bsdlabel`, where _diskslice_ is the disk and slice to boot from, such as [.filename]#ad0s1# for the first slice on the first IDE disk:
-
+For example, supposing that the first BIOS disk is device [.filename]#ada0#, the UFS root partition is (MBR) partition number 1 on that disk, and FreeBSD proper is installed in a UFS partition:
 [source,shell]
 ....
-# bsdlabel -B diskslice
+# gpart bootstrap -p /boot/boot -i 1 ada0
 ....
 
-[WARNING]
-====
-If just the disk name is used, such as [.filename]#ad0#, `bsdlabel` will create the disk in "dangerously dedicated mode", without slices.
-This is probably not the desired action, so double check the _diskslice_ before pressing kbd:[Return].
-====
-
 [[boot-loader]]
-=== Stage Three
+=== The Loader
 
-The loader is the final stage of the three-stage bootstrap process.
-It is located on the file system, usually as [.filename]#/boot/loader#.
+The loader is where the several variants of the FreeBSD bootstrap process come together and are largely the same.
+It is located on the file system, as variously [.filename]#/boot/loader#, [.filename]#/boot/zfsloader#, or [.filename]#/boot/loader.efi#.
 
 The loader is intended as an interactive method for configuration, using a built-in command set, backed up by a more powerful interpreter which has a more complex command set.
 
@@ -218,7 +359,7 @@ The loader will then read [.filename]#/boot/loader.rc#, which by default reads i
 Finally, by default, loader issues a 10 second wait for key presses, and boots the kernel if it is not interrupted.
 If interrupted, the user is presented with a prompt which understands the command set, where the user may adjust variables, unload all modules, load modules, and then finally boot or reboot.
 crossref:boot[boot-loader-commands,Loader Built-In Commands] lists the most commonly used loader commands.
-For a complete discussion of all available commands, refer to man:loader[8].
+For a complete discussion of all available commands, refer to man:loader[8], man:zfsloader[8], and man:loader.efi[8].
 
 [[boot-loader-commands]]
 .Loader Built-In Commands
@@ -308,7 +449,7 @@ To load an automated kernel configuration script:
 ....
 
 [[boot-init]]
-=== Last Stage
+=== The kernel and the first application-mode process
 
 Once the kernel is loaded by either loader or by boot2, which bypasses loader, it examines any boot flags and adjusts its behavior as necessary.
 crossref:boot[boot-kernel,Kernel Interaction During Boot] lists the commonly used boot flags.
@@ -335,7 +476,7 @@ Refer to man:boot[8] for more information on the other boot flags.
 |===
 
 Once the kernel has finished booting, it passes control to the user process man:init[8], which is located at [.filename]#/sbin/init#, or the program path specified in the `init_path` variable in `loader`.
-This is the last stage of the boot process.
+This is the first application-mode process and the final part of the boot process.
 
 The boot sequence makes sure that the file systems available on the system are consistent.
 If a UFS file system is not, and `fsck` cannot fix the inconsistencies, init drops the system into single-user mode so that the system administrator can resolve the problem directly.
@@ -402,7 +543,7 @@ During initial system startup, the boot man:loader[8] reads man:device.hints[5].
 This file stores kernel boot information known as variables, sometimes referred to as "device hints".
 These "device hints" are used by device drivers for device configuration.
 
-Device hints may also be specified at the Stage 3 boot loader prompt, as
+Device hints may also be specified at the loader prompt, as
 demonstrated in crossref:boot[boot-loader, Stage Three].
 Variables can be added using `set`, removed with `unset`, and viewed `show`.
 Variables set in [.filename]#/boot/device.hints# can also be overridden.
